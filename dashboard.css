@@ -1,0 +1,806 @@
+/* Base Styles & Variables */
+:root {
+    --primary: #4361ee;
+    --primary-dark: #3a56d4;
+    --secondary: #3f37c9;
+    --accent: #4895ef;
+    --danger: #f72585;
+    --success: #4cc9f0;
+    --warning: #f8961e;
+    --light: #f8f9fa;
+    --dark: #212529;
+    --gray: #6c757d;
+    --gray-light: #e9ecef;
+    --sidebar-width: 280px;
+    --header-height: 80px;
+    --transition: all 0.3s ease;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    display: flex;
+    min-height: 100vh;
+    background-color: #f5f7fa;
+    color: var(--dark);
+}
+
+/* Sidebar Styles */
+.sidebar {
+    width: var(--sidebar-width);
+    height: 100vh;
+    background: linear-gradient(135deg, #1e1e2f, #2a2a3a);
+    color: white;
+    padding: 25px 20px;
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    box-shadow: 2px 0 15px rgba(0, 0, 0, 0.1);
+    z-index: 10;
+}
+
+.logo-container {
+    display: flex;
+    align-items: center;
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.logo-icon {
+    font-size: 24px;
+    margin-right: 12px;
+    color: var(--accent);
+}
+
+.logo-text {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.new-btn-container {
+    position: relative;
+    margin-bottom: 30px;
+}
+
+.new-btn {
+    width: 100%;
+    padding: 12px 15px;
+    background-color: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    box-shadow: 0 4px 12px rgba(72, 149, 239, 0.3);
+}
+
+.new-btn:hover {
+    background-color: #3a8be4;
+    transform: translateY(-2px);
+}
+
+.new-btn i {
+    margin-right: 8px;
+}
+
+.dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    z-index: 20;
+    margin-top: 5px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(10px);
+    transition: var(--transition);
+}
+
+.dropdown.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.dropdown ul {
+    list-style: none;
+}
+
+.dropdown li {
+    padding: 12px 15px;
+    color: var(--dark);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    transition: var(--transition);
+}
+
+.dropdown li:hover {
+    background-color: var(--gray-light);
+}
+
+.dropdown li i {
+    margin-right: 10px;
+    color: var(--gray);
+}
+
+.sidebar-nav ul {
+    list-style: none;
+    margin-top: 10px;
+}
+
+.sidebar-nav li {
+    padding: 12px 15px;
+    margin: 5px 0;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    transition: var(--transition);
+}
+
+.sidebar-nav li.active, 
+.sidebar-nav li:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-nav li i {
+    margin-right: 12px;
+    width: 20px;
+    text-align: center;
+}
+
+.storage-info {
+    margin-top: auto;
+    padding: 20px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+}
+
+.storage-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.storage-percent {
+    font-weight: 600;
+    color: white;
+}
+
+.progress-container {
+    margin-bottom: 15px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 6px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--primary));
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+.upgrade-btn {
+    width: 100%;
+    padding: 10px;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.upgrade-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(67, 97, 238, 0.3);
+}
+
+.upgrade-btn i {
+    margin-right: 8px;
+}
+
+/* Main Content Styles */
+main {
+    flex: 1;
+    margin-left: var(--sidebar-width);
+    padding: 30px;
+    background-color: #f5f7fa;
+}
+
+.main-header {
+    margin-bottom: 30px;
+}
+
+.header-content {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.greeting {
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--dark);
+}
+
+.header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.search-container {
+    position: relative;
+    width: 300px;
+}
+
+.search-icon {
+    position: absolute;
+    left: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--gray);
+}
+
+.search-input {
+    width: 100%;
+    padding: 12px 20px 12px 45px;
+    border: 1px solid var(--gray-light);
+    border-radius: 8px;
+    font-size: 14px;
+    transition: var(--transition);
+    background-color: white;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(72, 149, 239, 0.2);
+}
+
+.go-up-btn {
+    padding: 10px 15px;
+    background-color: white;
+    color: var(--primary);
+    border: 1px solid var(--gray-light);
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    transition: var(--transition);
+}
+
+.go-up-btn:hover {
+    background-color: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.go-up-btn i {
+    margin-right: 6px;
+}
+
+/* Content Container */
+.content-container {
+    background-color: white;
+    border-radius: 12px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.03);
+    overflow: hidden;
+}
+
+.toolbar {
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--gray-light);
+    display: flex;
+    justify-content: flex-end;
+}
+
+.sort-container {
+    display: flex;
+    align-items: center;
+}
+
+.sort-label {
+    font-size: 14px;
+    color: var(--gray);
+    margin-right: 10px;
+}
+
+.sort-select {
+    padding: 8px 12px;
+    border: 1px solid var(--gray-light);
+    border-radius: 6px;
+    font-size: 14px;
+    background-color: white;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.sort-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(72, 149, 239, 0.2);
+}
+
+/* File Browser Styles */
+.file-browser {
+    width: 100%;
+}
+
+.file-table-header {
+    padding: 15px 20px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid var(--gray-light);
+    font-weight: 600;
+    color: var(--gray);
+}
+
+.file-table-row {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--gray-light);
+    transition: var(--transition);
+}
+
+.file-table-row:hover {
+    background-color: #f8f9fa;
+}
+
+.file-table-cell {
+    padding: 0 10px;
+}
+
+.name-header, .name-cell {
+    flex: 3;
+}
+
+.modified-header, .modified-cell {
+    flex: 2;
+}
+
+.action-header, .action-cell {
+    flex: 1;
+    text-align: right;
+}
+
+.folder-icon, .file-icon {
+    margin-right: 12px;
+    color: var(--accent);
+}
+
+.file-name {
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.file-name:hover {
+    color: var(--primary);
+}
+
+.file-modified {
+    color: var(--gray);
+    font-size: 14px;
+}
+
+.access-btn, .delete-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+}
+
+.access-btn {
+    background-color: var(--primary);
+    color: white;
+}
+
+.access-btn:hover {
+    background-color: var(--primary-dark);
+}
+
+.access-btn i {
+    margin-right: 5px;
+}
+
+.delete-btn {
+    background-color: var(--danger);
+    color: white;
+    margin-left: 8px;
+}
+
+.delete-btn:hover {
+    background-color: #e5177b;
+}
+
+.delete-btn i {
+    margin-right: 5px;
+}
+
+/* Encrypted Folder Styles */
+.encrypted-folder {
+    background-color: rgba(67, 97, 238, 0.05);
+    border-left: 3px solid var(--primary);
+}
+
+.encrypted-folder .folder-icon {
+    color: var(--primary);
+}
+
+/* Empty State */
+.empty-state {
+    padding: 50px 20px;
+    text-align: center;
+    color: var(--gray);
+}
+
+.empty-state i {
+    font-size: 50px;
+    margin-bottom: 20px;
+    color: var(--gray-light);
+}
+
+/* Responsive Adjustments */
+@media (max-width: 992px) {
+    .sidebar {
+        width: 80px;
+        padding: 20px 10px;
+        overflow: hidden;
+    }
+
+    .logo-text, .new-btn span, .sidebar-nav li span, 
+    .storage-header span:first-child, .upgrade-btn span {
+        display: none;
+    }
+
+    .logo-icon, .sidebar-nav li i, .upgrade-btn i {
+        margin-right: 0;
+        font-size: 20px;
+    }
+
+    .logo-container {
+        justify-content: center;
+        padding-bottom: 15px;
+    }
+
+    .new-btn {
+        padding: 12px;
+        justify-content: center;
+    }
+
+    .new-btn i {
+        margin-right: 0;
+    }
+
+    .sidebar-nav li {
+        justify-content: center;
+        padding: 15px 0;
+    }
+
+    main {
+        margin-left: 80px;
+    }
+}
+
+@media (max-width: 768px) {
+    .header-actions {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+
+    .search-container {
+        width: 100%;
+    }
+
+    .file-table-cell {
+        padding: 0 5px;
+    }
+
+    .file-name, .file-modified {
+        font-size: 14px;
+    }
+}
+
+.download-btn {
+    padding: 6px 12px;
+    background-color: var(--success);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    margin-right: 8px;
+}
+
+.download-btn:hover {
+    background-color: #3ab5d8;
+}
+
+.download-btn i {
+    margin-right: 5px;
+}
+
+@keyframes fa-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(359deg); }
+}
+
+.fa-spinner.fa-spin {
+    animation: fa-spin 1s infinite linear;
+    margin-right: 5px;
+}
+
+/* Error message styling */
+.error-message {
+    background-color: #ffebee;
+    border-left: 4px solid var(--danger);
+    padding: 15px;
+    margin: 15px 0;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.error-message i {
+    color: var(--danger);
+    margin-right: 10px;
+    font-size: 20px;
+}
+
+/* File table improvements */
+.file-table-row {
+    display: grid;
+    grid-template-columns: 3fr 2fr 1fr;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--gray-light);
+}
+
+.file-table-header .file-table-row {
+    font-weight: 600;
+    color: var(--gray);
+    background-color: #f8f9fa;
+}
+
+/* Action buttons container */
+.action-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* Make download button more visible */
+.download-btn {
+    background-color: var(--success);
+    color: white;
+}
+
+.download-btn:hover {
+    background-color: #3ab5d8;
+}
+
+/* Confirmation dialog styles */
+.confirm-dialog {
+    max-width: 400px;
+    padding: 20px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+.confirm-dialog h3 {
+    margin-top: 0;
+    color: var(--danger);
+}
+
+.confirm-dialog p {
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+.confirm-dialog-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.confirm-dialog-btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.confirm-dialog-btn.cancel {
+    background: var(--gray-light);
+    color: var(--dark);
+}
+
+.confirm-dialog-btn.confirm {
+    background: var(--danger);
+    color: white;
+}
+
+.zip-btn {
+    padding: 6px 12px;
+    background-color: var(--warning);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    margin-right: 8px;
+}
+
+.zip-btn:hover {
+    background-color: #e68a1a;
+}
+
+.zip-btn i {
+    margin-right: 5px;
+}
+
+/* Style for zip files */
+.file-table-row .file-icon[data-filetype="zip"] {
+    color: var(--warning);
+}
+
+.sidebar-nav li.active {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-left: 3px solid var(--accent);
+}
+
+.sidebar-nav li {
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.sidebar-nav li:hover:not(.active) {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Add to the existing star button styles */
+.star-btn {
+    background: none;
+    border: none;
+    color: var(--gray);
+    cursor: pointer;
+    font-size: 14px;
+    margin-right: 8px;
+    transition: var(--transition);
+    padding: 0;
+}
+
+.star-btn.active {
+    color: var(--warning);
+}
+
+.star-btn:hover {
+    color: var(--warning);
+    transform: scale(1.2);
+}
+
+.star-btn i {
+    pointer-events: none;
+}
+
+/* Make the star more visible */
+.star-btn.active i {
+    text-shadow: 0 0 5px rgba(248, 150, 30, 0.5);
+}
+
+/* Starred view styles */
+.starred-item {
+    background-color: rgba(248, 150, 30, 0.05);
+}
+
+
+/* Add to dashboard.css */
+.file-table-row {
+    transition: padding-left 0.2s ease;
+}
+
+.rename-btn {
+    padding: 6px 12px;
+    background-color: #7986cb;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    margin-right: 8px;
+}
+
+.rename-btn:hover {
+    background-color: #6f42c1;
+}
+
+.rename-btn i {
+    margin-right: 5px;
+}
+/* Style for the action buttons container */
+.action-cell {
+    display: flex;
+    gap: 8px; /* Space between buttons */
+    flex-wrap: nowrap; /* Prevent wrapping to new line */
+    overflow: visible; /* Allow buttons to overflow if needed */
+    justify-content: flex-end; /* Align buttons to the right */
+}
+
+/* Make buttons compact */
+.rename-btn, .download-btn, .delete-btn, .zip-btn {
+    white-space: nowrap; /* Prevent text wrapping */
+    padding: 6px 8px; /* Smaller padding */
+    font-size: 12px; /* Slightly smaller font */
+}
+
+/* Optional: Add tooltips for compact buttons */
+.action-btn {
+    position: relative;
+}
+.action-btn:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--dark);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+

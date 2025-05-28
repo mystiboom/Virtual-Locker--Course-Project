@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Locker - Secure Cloud Storage</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="dashboard.css">
+    <script defer src="dashboard.js"></script>
+</head>
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="logo-container">
+            <i class="fas fa-lock logo-icon"></i>
+            <span class="logo-text">Virtual Locker</span>
+        </div>
+
+        <div class="new-btn-container">
+            <button class="new-btn" id="newBtn">
+                <i class="fas fa-plus"></i> New
+            </button>
+            <div class="dropdown hidden" id="dropdown">
+                <ul>
+                    <li id="newFolder"><i class="fas fa-folder-plus"></i> New Folder</li>
+                    <li id="fileUpload"><i class="fas fa-file-upload"></i> File Upload</li>
+                </ul>
+            </div>
+            <input type="file" id="fileInput" style="display: none;" multiple>
+        </div>
+
+        <nav class="sidebar-nav">
+            <ul>
+                <li class="active" id="homeButton"><i class="fas fa-home"></i> Home</li>
+                <li id="starredButton"><i class="far fa-star"></i> Starred</li>
+            </ul>
+        </nav>
+
+        
+    </aside>
+
+    <!-- Main Content -->
+    <main>
+        <header class="main-header">
+            <div class="header-content">
+                <h1 class="greeting">Welcome back!</h1>
+                <div class="header-actions">
+                    <div class="search-container">
+                        <i class="fas fa-search search-icon"></i>
+                        <input type="text" id="searchInput" placeholder="Search files..." class="search-input">
+                    </div>
+                    <button id="goUpBtn" class="go-up-btn" title="Go to parent folder">
+                        <i class="fas fa-level-up-alt"></i> Up
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <div class="content-container">
+            <div class="toolbar">
+                <div class="sort-container">
+                    <label for="sortOptions" class="sort-label">Sort by:</label>
+                    <select id="sortOptions" class="sort-select">
+                        <option value="nameAsc">Name (A-Z)</option>
+                        <option value="nameDesc">Name (Z-A)</option>
+                        <option value="dateAsc">Date (Oldest)</option>
+                        <option value="dateDesc">Date (Newest)</option>
+                    </select>
+                </div>
+            </div>
+
+            <section class="file-browser">
+                <div class="file-table-header">
+                    <div class="file-table-row">
+                        <div class="file-table-cell name-header">Name</div>
+                        <div class="file-table-cell modified-header">Last Modified</div>
+                        <div class="file-table-cell action-header">Actions</div>
+                    </div>
+                </div>
+                
+                <div class="file-table-body" id="fileTableBody">
+                    <!-- Encrypted Folder (always visible in root) -->
+                    <div class="file-table-row encrypted-folder">
+                        <div class="name-cell">
+                            <i class="fas fa-folder folder-icon"></i>
+                            <span class="file-name">Encrypted Folder</span>
+                        </div>
+                        <div class="modified-cell">
+                            <span class="file-modified">Locked <i class="fas fa-lock"></i></span>
+                        </div>
+                        <div class="action-cell">
+                            <div class="action-buttons">
+                                <button class="access-btn">
+                                    <i class="fas fa-key"></i> Access
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+</body>
+</html>

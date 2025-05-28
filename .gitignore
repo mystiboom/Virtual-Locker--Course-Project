@@ -1,0 +1,11 @@
+/.babelrc
+/auth.html
+/babel.config.js
+/back
+/front
+/main.py
+/node_modules
+/package-lock.json
+/temp_zips
+/uploads
+/__pycache__
