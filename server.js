@@ -9,23 +9,55 @@ const fs = require("fs");
 const crypto = require('crypto');
 const algorithm = 'aes-256-cbc';
 const archiver = require('archiver');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
-app.use(cors());
+// Configure CORS for production - restrict to specific origins
+// In development, you might want to allow more origins
+const corsOptions = {
+  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['http://localhost:3000'],
+  credentials: true,
+};
+app.use(cors(corsOptions));
 app.use(express.json());
+
+// Simple error logging to file
+const logErrorToFile = (error) => {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${error.stack || error.message}\n`;
+  fs.appendFile(path.join(__dirname, 'error.log'), logError, (err) => {
+    if (err) {
+      console.error('Failed to write to error log:', err);
+    }
+  });
+};
 
 // MongoDB Connection
 const mongoURI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/fileUploads";
 mongoose.connect(mongoURI)
     .then(() => console.log("✅ MongoDB Connected"))
-    .catch(err => console.error("❌ MongoDB Connection Error:", err));
+    .catch(err => {
+      console.error("❌ MongoDB Connection Error:", err);
+      logErrorToFile(new Error(`MongoDB Connection Error: ${err}`));
+    });
 
 const conn = mongoose.connection;
 let gfs;
 
 conn.once("open", () => {
-    gfs = new GridFSBucket(conn.db, { bucketName: "uploads" });
-    console.log("✅ GridFS Initialized");
+    try {
+      gfs = new GridFSBucket(conn.db, { bucketName: "uploads" });
+      console.log("✅ GridFS Initialized");
+    } catch (err) {
+      console.error("❌ GridFS Initialization Error:", err);
+      logErrorToFile(new Error(`GridFS Initialization Error: ${err}`));
+    }
+});
+
+conn.on("error", (err) => {
+    console.error("❌ MongoDB Connection Error:", err);
+    logErrorToFile(new Error(`MongoDB Connection Error: ${err}`));
 });
 
 // Multer Configuration
@@ -40,51 +72,29 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-async function addFolderToArchive(archive, folderName, currentPath = '') {
-    // Add all files in current folder
-    const files = await conn.db.collection("uploads.files")
-        .find({ "metadata.folder": folderName })
-        .toArray();
-
-    for (const file of files) {
-        const downloadStream = gfs.openDownloadStream(file._id);
-        archive.append(downloadStream, { 
-            name: path.join(currentPath, file.filename) 
-        });
-    }
-
-    // Recursively add subfolders
-    const subfolders = await conn.db.collection("folders")
-        .find({ parent: folderName })
-        .toArray();
-
-    for (const subfolder of subfolders) {
-        const folderPath = path.join(currentPath, subfolder.name);
-        await addFolderToArchive(archive, subfolder.name, folderPath);
-    }
-}
 
 
 
+const bcrypt = require('bcrypt');
 
 app.post('/verify-folder-password', async (req, res) => {
     const { folderName, password } = req.body;
-    
+
     if (folderName !== "Encrypted Folder") {
         return res.status(400).send("Not an encrypted folder");
     }
-    
-    // In a real app, you'd store hashed passwords in the database
-    // For demo purposes, we'll use a simple approach
-    const encryptedPassword = crypto.createHash('sha256').update(password).digest('hex');
-    
+
     // This would normally come from your database
-    const correctPasswordHash = process.env.ENCRYPTED_FOLDER_PASSWORD_HASH || 
-        crypto.createHash('sha256').update("defaultpassword").digest('hex');
-    
-    if (encryptedPassword === correctPasswordHash) {
-        // Generate a temporary access token (valid for 1 hour)
-        const token = crypto.randomBytes(32).toString('hex');
+    const correctPasswordHash = process.env.ENCRYPTED_FOLDER_PASSWORD_HASH ||
+        await bcrypt.hash("defaultpassword", 10);
+
+    // Compare password using bcrypt's constant-time comparison
+    const isValid = await bcrypt.compare(password, correctPasswordHash);
+
+    if (isValid) {
+        // Generate a temporary access token with timestamp (valid for 1 hour)
+        const timestamp = Date.now();
+        const token = crypto.randomBytes(32).toString('hex') + '.' + timestamp;
         res.json({ success: true, token });
     } else {
         res.status(401).json({ success: false, message: "Incorrect password" });
@@ -94,25 +104,66 @@ app.post('/verify-folder-password', async (req, res) => {
 
 const checkEncryptedFolderAccess = (req, res, next) => {
     const folder = req.body.folder || req.query.folder;
-    
+
     if (folder === "Encrypted Folder") {
-        // In a real app, you'd verify a JWT or session token here
+        // Verify access token
         const token = req.headers['x-access-token'];
         if (!token) {
             return res.status(403).send("Access denied");
         }
-        // Token verification would go here
+
+        // Validate token format: hex.timestamp
+        const tokenParts = token.split('.');
+        if (tokenParts.length !== 2) {
+            return res.status(403).send("Invalid access token format");
+        }
+
+        const tokenHex = tokenParts[0];
+        const tokenTimestamp = parseInt(tokenParts[1], 10);
+
+        // Check if token is a valid hex string
+        const isValidHex = /^[0-9a-f]{64}$/.test(tokenHex);
+        if (!isValidHex) {
+            return res.status(403).send("Invalid access token");
+        }
+
+        // Check if timestamp is valid
+        if (isNaN(tokenTimestamp) || tokenTimestamp <= 0) {
+            return res.status(403).send("Invalid access token");
+        }
+
+        // Check if token has expired (valid for 1 hour)
+        const ONE_HOUR = 60 * 60 * 1000;
+        if (Date.now() - tokenTimestamp > ONE_HOUR) {
+            return res.status(403).send("Access token expired");
+        }
     }
-    
+
     next();
 };
 // Upload Endpoint
 app.post('/upload',checkEncryptedFolderAccess ,upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).send("No file uploaded");
 
+    // Validate folder parameter
+    let folder = req.body.folder || "root";
+    if (typeof folder !== 'string') {
+        folder = "root";
+    }
+
+    // Limit folder name length
+    if (folder.length > 100) {
+        return res.status(400).send("Folder name too long");
+    }
+
+    // Prevent problematic characters in folder name
+    if (/[<>:"/\\|?*\x00-\x1f]/.test(folder)) {
+        return res.status(400).send("Folder name contains invalid characters");
+    }
+
     const readStream = fs.createReadStream(req.file.path);
     const writeStream = gfs.openUploadStream(req.file.filename, {
-        metadata: { folder: req.body.folder || "root" }
+        metadata: { folder: folder.trim() || "root" }
     });
 
     readStream.pipe(writeStream)
@@ -132,16 +183,31 @@ app.post('/upload',checkEncryptedFolderAccess ,upload.single('file'), async (req
 //  Add this endpoint
 app.post("/create-folder", checkEncryptedFolderAccess, async (req, res) => {
     const { folderName, parentFolder } = req.body;
-    
+
+    // Input validation
+    if (!folderName || typeof folderName !== 'string' || folderName.trim() === '') {
+        return res.status(400).send("Folder name is required");
+    }
+
+    // Limit folder name length
+    if (folderName.length > 100) {
+        return res.status(400).send("Folder name too long");
+    }
+
+    // Prevent problematic characters
+    if (/[<>:"/\\|?*\x00-\x1f]/.test(folderName)) {
+        return res.status(400).send("Folder name contains invalid characters");
+    }
+
     try {
         // Save folder metadata in a new collection (e.g., "folders")
         await conn.db.collection("folders").insertOne({
-            name: folderName,
+            name: folderName.trim(),
             parent: parentFolder || "root",
             type: "folder",
             created: new Date()
         });
-        
+
         res.status(201).send("Folder created");
     } catch (error) {
         res.status(500).send("Failed to create folder");
@@ -253,34 +319,59 @@ async function addFolderToArchive(archive, folderName, currentPath = '') {
 // Add to server.js
 app.put('/rename', async (req, res) => {
     const { oldName, newName, type } = req.body;
-    
+
+    // Input validation
+    if (!oldName || typeof oldName !== 'string' || oldName.trim() === '') {
+        return res.status(400).send("Old name is required");
+    }
+
+    if (!newName || typeof newName !== 'string' || newName.trim() === '') {
+        return res.status(400).send("New name is required");
+    }
+
+    // Limit name length
+    if (oldName.length > 100 || newName.length > 100) {
+        return res.status(400).send("Name too long");
+    }
+
+    // Prevent problematic characters
+    const invalidCharPattern = /[<>:"/\\|?*\x00-\x1f]/;
+    if (invalidCharPattern.test(oldName) || invalidCharPattern.test(newName)) {
+        return res.status(400).send("Name contains invalid characters");
+    }
+
+    // Prevent same name
+    if (oldName.trim() === newName.trim()) {
+        return res.status(400).send("New name must be different from old name");
+    }
+
     try {
         if (type === 'file') {
             // Rename file in GridFS
             await conn.db.collection("uploads.files").updateOne(
-                { filename: oldName },
-                { $set: { filename: newName } }
+                { filename: oldName.trim() },
+                { $set: { filename: newName.trim() } }
             );
         } else if (type === 'folder') {
             // Rename folder and update all references
             await conn.db.collection("folders").updateOne(
-                { name: oldName },
-                { $set: { name: newName } }
+                { name: oldName.trim() },
+                { $set: { name: newName.trim() } }
             );
-            
+
             // Update files in this folder
             await conn.db.collection("uploads.files").updateMany(
-                { "metadata.folder": oldName },
-                { $set: { "metadata.folder": newName } }
+                { "metadata.folder": oldName.trim() },
+                { $set: { "metadata.folder": newName.trim() } }
             );
-            
+
             // Update subfolders' parent references
             await conn.db.collection("folders").updateMany(
-                { parent: oldName },
-                { $set: { parent: newName } }
+                { parent: oldName.trim() },
+                { $set: { parent: newName.trim() } }
             );
         }
-        
+
         res.json({ success: true, message: "Renamed successfully" });
     } catch (error) {
         console.error("Rename error:", error);

@@ -1,11 +1,6 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
-const { TextEncoder, TextDecoder } = require('util');
-
-// Add polyfills
-global.TextEncoder = TextEncoder;
-global.TextDecoder = TextDecoder;
 
 // Create minimal express app for testing
 const express = require('express');
@@ -46,7 +41,7 @@ describe('Server API', () => {
     const response = await request(app)
       .post('/create-folder')
       .send({ folderName: 'test-folder' });
-    
+
     expect(response.status).toBe(201);
     expect(response.text).toBe('Folder created');
   });
@@ -56,7 +51,7 @@ describe('Server API', () => {
       .post('/upload')
       .field('folder', 'test')
       .attach('file', Buffer.from('test'), 'test.txt');
-    
+
     expect(response.status).toBe(200);
     expect(response.body.message).toBe('File uploaded successfully');
   });
@@ -64,7 +59,7 @@ describe('Server API', () => {
   it('should list files', async () => {
     const response = await request(app)
       .get('/files');
-    
+
     expect(response.status).toBe(200);
     expect(Array.isArray(response.body)).toBe(true);
   });

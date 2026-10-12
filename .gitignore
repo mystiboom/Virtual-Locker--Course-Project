@@ -4,6 +4,7 @@
 /back
 /front
 /main.py
+/.env
 /node_modules
 /package-lock.json
 /temp_zips
