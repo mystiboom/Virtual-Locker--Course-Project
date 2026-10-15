@@ -190,7 +190,7 @@ document.addEventListener("DOMContentLoaded", function () {
     async function starFolderContents(folderName) {
     try {
         // Get all files and subfolders in this folder
-        const response = await fetch(`http://localhost:5000/files?folder=${encodeURIComponent(folderName)}`);
+        const response = await fetch(`/files?folder=${encodeURIComponent(folderName)}`);
         const items = await response.json();
         
         for (const item of items) {
@@ -215,7 +215,7 @@ async function renameItem(oldName, isFolder) {
     if (!newName || newName === oldName) return;
 
     try {
-        const response = await fetch("http://localhost:5000/rename", {
+        const response = await fetch("/rename", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
@@ -253,7 +253,7 @@ async function renameItem(oldName, isFolder) {
         formData.append("folder", currentFolder);
 
         try {
-            const response = await fetch("http://localhost:5000/upload", {
+            const response = await fetch("/upload", {
                 method: "POST",
                 body: formData,
             });
@@ -270,7 +270,7 @@ async function renameItem(oldName, isFolder) {
 
     async function createFolder(folderName) {
         try {
-            const response = await fetch("http://localhost:5000/create-folder", {
+            const response = await fetch("/create-folder", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 
@@ -294,7 +294,7 @@ async function renameItem(oldName, isFolder) {
             // Show loading state
             fileTableBody.innerHTML = '<div class="loading-state"><i class="fas fa-spinner fa-spin"></i> Loading files...</div>';
             
-            const response = await fetch(`http://localhost:5000/files?folder=${currentFolder}`);
+            const response = await fetch(` /files?folder=${currentFolder}`);
             
             if (!response.ok) {
                 throw new Error(`Server returned ${response.status}`);
@@ -363,7 +363,7 @@ async function renameItem(oldName, isFolder) {
         try {
             // Create a temporary anchor element to trigger download
             const a = document.createElement('a');
-            a.href = `http://localhost:5000/download/${filename}`;
+            a.href = ` /download/${filename}`;
             a.download = filename;
             document.body.appendChild(a);
             a.click();
@@ -492,7 +492,7 @@ async function renameItem(oldName, isFolder) {
         if (!confirm(`Are you sure you want to delete "${filename}"?`)) return;
     
         try {
-            const response = await fetch(`http://localhost:5000/delete/${encodeURIComponent(filename)}`, {
+            const response = await fetch(` /delete/${encodeURIComponent(filename)}`, {
                 method: "DELETE",
             });
             
@@ -535,7 +535,7 @@ async function renameItem(oldName, isFolder) {
     async function deleteFolderContents(folderName) {
         try {
             // First delete all files in the folder
-            const filesResponse = await fetch(`http://localhost:5000/files?folder=${encodeURIComponent(folderName)}`);
+            const filesResponse = await fetch(` /files?folder=${encodeURIComponent(folderName)}`);
             const items = await filesResponse.json();
             
             // Delete all files and subfolders recursively
@@ -543,7 +543,7 @@ async function renameItem(oldName, isFolder) {
                 if (item.type === 'folder') {
                     await deleteFolderContents(item.name);
                 }
-                await fetch(`http://localhost:5000/delete/${encodeURIComponent(item.filename || item.name)}`, {
+                await fetch(` /delete/${encodeURIComponent(item.filename || item.name)}`, {
                     method: "DELETE",
                 });
             }
@@ -572,7 +572,7 @@ async function renameItem(oldName, isFolder) {
         if (!password) return;
         
         try {
-            const response = await fetch("http://localhost:5000/verify-folder-password", {
+            const response = await fetch(" /verify-folder-password", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -601,7 +601,7 @@ async function renameItem(oldName, isFolder) {
         console.log("Zip button clicked - Folder:", folderName); 
 
         try {
-            const response = await fetch('http://localhost:5000/zip-folder', {
+            const response = await fetch(' /zip-folder', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ folderName })
