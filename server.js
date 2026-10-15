@@ -471,7 +471,10 @@ app.delete('/delete/:name', async (req, res) => {
         });
     }
 });
-
+// Serve the Virtual Locker dashboard as the homepage
+app.get("/", (req, res) => {
+    res.sendFile(require("path").join(__dirname, "dashboard.html"));
+});
 // Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running at http://localhost:${PORT}`));
