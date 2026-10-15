@@ -11,6 +11,7 @@ const algorithm = 'aes-256-cbc';
 const archiver = require('archiver');
 
 const app = express();
+app.use(express.static(__dirname));
 // Configure CORS for production - restrict to specific origins
 // In development, you might want to allow more origins
 const corsOptions = {
