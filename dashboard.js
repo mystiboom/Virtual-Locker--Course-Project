@@ -15,7 +15,47 @@ document.addEventListener("DOMContentLoaded", function () {
     const urlParams = new URLSearchParams(window.location.search);
     let currentFolder = urlParams.get("folder") || "root";
     let starredItems = JSON.parse(localStorage.getItem('starredItems')) || {};
-    let isStarredView = false;  
+    let isStarredView = false;
+
+    // A URL/history entry must never unlock the encrypted folder by itself.
+    // If the page is opened directly at that URL without a live session token,
+    // normalize it back to the root dashboard.
+    if (currentFolder === "Encrypted Folder" && !sessionStorage.getItem("encryptedFolderToken")) {
+        currentFolder = "root";
+        history.replaceState({ folder: "root" }, "", "?folder=root");
+    }
+
+    function clearEncryptedFolderAccess() {
+        sessionStorage.removeItem("encryptedFolderToken");
+    }
+
+    async function apiFetch(url, options = {}) {
+        const headers = new Headers(options.headers || {});
+        const token = sessionStorage.getItem("encryptedFolderToken");
+        if (token) headers.set("x-access-token", token);
+        return fetch(url, { ...options, headers });
+    }
+
+    // Handle browser Back/Forward. Leaving the encrypted folder locks it again;
+    // Forward navigation to its old history entry cannot restore the token.
+    window.addEventListener("popstate", () => {
+        const params = new URLSearchParams(window.location.search);
+        let targetFolder = params.get("folder") || "root";
+
+        if (currentFolder === "Encrypted Folder" && targetFolder !== "Encrypted Folder") {
+            clearEncryptedFolderAccess();
+        }
+
+        if (targetFolder === "Encrypted Folder" && !sessionStorage.getItem("encryptedFolderToken")) {
+            targetFolder = "root";
+            history.replaceState({ folder: "root" }, "", "?folder=root");
+        }
+
+        currentFolder = targetFolder;
+        isStarredView = false;
+        fetchFiles();
+    });
+
     // Initialize
     ensureEncryptedFolder();
     fetchFiles();
@@ -114,6 +154,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function navigateToRoot() {
         isStarredView = false; // Ensure we're not in starred view
+        // Explicitly leaving the encrypted folder locks it again.
+        clearEncryptedFolderAccess();
         currentFolder = "root";
         history.pushState({ folder: currentFolder }, "", `?folder=${currentFolder}`);
         fetchFiles();
@@ -190,7 +232,7 @@ document.addEventListener("DOMContentLoaded", function () {
     async function starFolderContents(folderName) {
     try {
         // Get all files and subfolders in this folder
-        const response = await fetch(`/files?folder=${encodeURIComponent(folderName)}`);
+        const response = await apiFetch(`/files?folder=${encodeURIComponent(folderName)}`);
         const items = await response.json();
         
         for (const item of items) {
@@ -215,7 +257,7 @@ async function renameItem(oldName, isFolder) {
     if (!newName || newName === oldName) return;
 
     try {
-        const response = await fetch("/rename", {
+        const response = await apiFetch("/rename", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
@@ -253,7 +295,7 @@ async function renameItem(oldName, isFolder) {
         formData.append("folder", currentFolder);
 
         try {
-            const response = await fetch("/upload", {
+            const response = await apiFetch("/upload", {
                 method: "POST",
                 body: formData,
             });
@@ -270,7 +312,7 @@ async function renameItem(oldName, isFolder) {
 
     async function createFolder(folderName) {
         try {
-            const response = await fetch("/create-folder", {
+            const response = await apiFetch("/create-folder", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 
@@ -294,7 +336,7 @@ async function renameItem(oldName, isFolder) {
             // Show loading state
             fileTableBody.innerHTML = '<div class="loading-state"><i class="fas fa-spinner fa-spin"></i> Loading files...</div>';
             
-            const response = await fetch(` /files?folder=${currentFolder}`);
+            const response = await apiFetch(`/files?folder=${currentFolder}`);
             
             if (!response.ok) {
                 throw new Error(`Server returned ${response.status}`);
@@ -361,13 +403,17 @@ async function renameItem(oldName, isFolder) {
 
     async function downloadFile(filename) {
         try {
-            // Create a temporary anchor element to trigger download
-            const a = document.createElement('a');
-            a.href = ` /download/${filename}`;
+            const response = await apiFetch(`/download/${encodeURIComponent(filename)}`);
+            if (!response.ok) throw new Error(`Download failed (${response.status})`);
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = objectUrl;
             a.download = filename;
             document.body.appendChild(a);
             a.click();
-            document.body.removeChild(a);
+            a.remove();
+            URL.revokeObjectURL(objectUrl);
         } catch (error) {
             console.error("Error downloading file:", error);
             alert("Failed to download file");
@@ -492,7 +538,7 @@ async function renameItem(oldName, isFolder) {
         if (!confirm(`Are you sure you want to delete "${filename}"?`)) return;
     
         try {
-            const response = await fetch(` /delete/${encodeURIComponent(filename)}`, {
+            const response = await apiFetch(`/delete/${encodeURIComponent(filename)}`, {
                 method: "DELETE",
             });
             
@@ -535,7 +581,7 @@ async function renameItem(oldName, isFolder) {
     async function deleteFolderContents(folderName) {
         try {
             // First delete all files in the folder
-            const filesResponse = await fetch(` /files?folder=${encodeURIComponent(folderName)}`);
+            const filesResponse = await apiFetch(`/files?folder=${encodeURIComponent(folderName)}`);
             const items = await filesResponse.json();
             
             // Delete all files and subfolders recursively
@@ -543,7 +589,7 @@ async function renameItem(oldName, isFolder) {
                 if (item.type === 'folder') {
                     await deleteFolderContents(item.name);
                 }
-                await fetch(` /delete/${encodeURIComponent(item.filename || item.name)}`, {
+                await apiFetch(`/delete/${encodeURIComponent(item.filename || item.name)}`, {
                     method: "DELETE",
                 });
             }
@@ -572,7 +618,7 @@ async function renameItem(oldName, isFolder) {
         if (!password) return;
         
         try {
-            const response = await fetch(" /verify-folder-password", {
+            const response = await apiFetch("/verify-folder-password", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -601,7 +647,7 @@ async function renameItem(oldName, isFolder) {
         console.log("Zip button clicked - Folder:", folderName); 
 
         try {
-            const response = await fetch(' /zip-folder', {
+            const response = await apiFetch('/zip-folder', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ folderName })
