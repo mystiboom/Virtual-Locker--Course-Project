@@ -9,6 +9,7 @@ const fs = require("fs");
 const crypto = require('crypto');
 const algorithm = 'aes-256-cbc';
 const archiver = require('archiver');
+const { pipeline } = require("stream/promises");
 
 const app = express();
 app.use(express.static(__dirname));
@@ -25,7 +26,7 @@ app.use(express.json());
 const logErrorToFile = (error) => {
   const timestamp = new Date().toISOString();
   const logMessage = `[${timestamp}] ${error.stack || error.message}\n`;
-  fs.appendFile(path.join(__dirname, 'error.log'), logError, (err) => {
+  fs.appendFile(path.join(__dirname, 'error.log'), logMessage, (err) => {
     if (err) {
       console.error('Failed to write to error log:', err);
     }
@@ -59,10 +60,16 @@ conn.on("error", (err) => {
     logErrorToFile(new Error(`MongoDB Connection Error: ${err}`));
 });
 
+const uploadsDir = path.join(__dirname, "uploads");
+
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
 // Multer Configuration
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, "uploads/");
+        cb(null, uploadsDir);
     },
     filename: (req, file, cb) => {
         cb(null, file.originalname);
@@ -70,9 +77,6 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
-
-
-
 
 const bcrypt = require('bcrypt');
 
@@ -141,43 +145,78 @@ const checkEncryptedFolderAccess = (req, res, next) => {
     next();
 };
 // Upload Endpoint
-app.post('/upload',checkEncryptedFolderAccess ,upload.single('file'), async (req, res) => {
-    if (!req.file) return res.status(400).send("No file uploaded");
+app.post(
+    "/upload",
+    checkEncryptedFolderAccess,
+    upload.single("file"),
+    async (req, res) => {
+        if (!req.file) {
+            return res.status(400).send("No file uploaded");
+        }
 
-    // Validate folder parameter
-    let folder = req.body.folder || "root";
-    if (typeof folder !== 'string') {
-        folder = "root";
-    }
+        const tempPath = req.file.path;
 
-    // Limit folder name length
-    if (folder.length > 100) {
-        return res.status(400).send("Folder name too long");
-    }
+        try {
+            let folder = req.body.folder || "root";
 
-    // Prevent problematic characters in folder name
-    if (/[<>:"/\\|?*\x00-\x1f]/.test(folder)) {
-        return res.status(400).send("Folder name contains invalid characters");
-    }
+            if (typeof folder !== "string" || folder.length > 100) {
+                return res.status(400).send("Invalid folder name");
+            }
 
-    const readStream = fs.createReadStream(req.file.path);
-    const writeStream = gfs.openUploadStream(req.file.filename, {
-        metadata: { folder: folder.trim() || "root" }
-    });
+            if (/[<>:"/\\|?*\x00-\x1f]/.test(folder)) {
+                return res.status(400).send(
+                    "Folder name contains invalid characters"
+                );
+            }
 
-    readStream.pipe(writeStream)
-        .on("error", (error) => {
-            console.error("Upload error:", error);
-            res.status(500).send("Upload failed");
-        })
-        .on("finish", () => {
-            fs.unlinkSync(req.file.path); // Delete temp file
-            res.status(200).json({
+            if (!gfs) {
+                return res.status(503).send(
+                    "File storage is not initialized"
+                );
+            }
+
+            const writeStream = gfs.openUploadStream(
+                req.file.originalname,
+                {
+                    metadata: {
+                        folder: folder.trim() || "root"
+                    }
+                }
+            );
+
+            await pipeline(
+                fs.createReadStream(tempPath),
+                writeStream
+            );
+
+            return res.status(200).json({
                 message: "File uploaded successfully",
-                file: req.file
+                file: {
+                    filename: req.file.originalname,
+                    size: req.file.size
+                }
             });
-        });
-});
+        } catch (error) {
+            console.error("Upload error:", error);
+
+            return res.status(500).json({
+                message: "Upload failed",
+                error: error.message
+            });
+        } finally {
+            try {
+                await fs.promises.unlink(tempPath);
+            } catch (error) {
+                if (error.code !== "ENOENT") {
+                    console.error(
+                        "Temporary file cleanup failed:",
+                        error
+                    );
+                }
+            }
+        }
+    }
+);
 
 //  Add this endpoint
 app.post("/create-folder", checkEncryptedFolderAccess, async (req, res) => {
