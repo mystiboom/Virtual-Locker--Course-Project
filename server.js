@@ -9,243 +9,222 @@ const fs = require("fs");
 const crypto = require('crypto');
 const algorithm = 'aes-256-cbc';
 const archiver = require('archiver');
-const { pipeline } = require("stream/promises");
 
 const app = express();
-app.use(express.static(__dirname));
-// Configure CORS for production - restrict to specific origins
-// In development, you might want to allow more origins
-const corsOptions = {
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['http://localhost:3000'],
-  credentials: true,
-};
-app.use(cors(corsOptions));
-app.use(express.json());
-
-// Simple error logging to file
-const logErrorToFile = (error) => {
-  const timestamp = new Date().toISOString();
-  const logMessage = `[${timestamp}] ${error.stack || error.message}\n`;
-  fs.appendFile(path.join(__dirname, 'error.log'), logMessage, (err) => {
-    if (err) {
-      console.error('Failed to write to error log:', err);
-    }
-  });
-};
+app.disable("x-powered-by");
+// Same-origin deployment needs no CORS. Enable cross-origin access only for explicitly trusted origins.
+if (process.env.ALLOWED_ORIGINS) {
+  const allowedOrigins = process.env.ALLOWED_ORIGINS.split(",").map(v => v.trim()).filter(Boolean);
+  app.use(cors({ origin: allowedOrigins }));
+}
+app.use(express.json({ limit: "1mb" }));
+// Serve only the intended frontend files; do not expose server.js, .env, or project files.
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "dashboard.html")));
+for (const asset of ["dashboard.css", "dashboard.js", "styles.css"]) {
+  app.get(`/${asset}`, (req, res) => res.sendFile(path.join(__dirname, asset)));
+}
 
 // MongoDB Connection
-const mongoURI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/fileUploads";
+const mongoURI = process.env.MONGO_URI;
 mongoose.connect(mongoURI)
     .then(() => console.log("✅ MongoDB Connected"))
-    .catch(err => {
-      console.error("❌ MongoDB Connection Error:", err);
-      logErrorToFile(new Error(`MongoDB Connection Error: ${err}`));
-    });
+    .catch(err => console.error("❌ MongoDB Connection Error:", err));
 
 const conn = mongoose.connection;
 let gfs;
 
 conn.once("open", () => {
-    try {
-      gfs = new GridFSBucket(conn.db, { bucketName: "uploads" });
-      console.log("✅ GridFS Initialized");
-    } catch (err) {
-      console.error("❌ GridFS Initialization Error:", err);
-      logErrorToFile(new Error(`GridFS Initialization Error: ${err}`));
-    }
+    gfs = new GridFSBucket(conn.db, { bucketName: "uploads" });
+    console.log("✅ GridFS Initialized");
 });
 
-conn.on("error", (err) => {
-    console.error("❌ MongoDB Connection Error:", err);
-    logErrorToFile(new Error(`MongoDB Connection Error: ${err}`));
+app.use((req, res, next) => {
+  if (!conn.db || !gfs || conn.readyState !== 1) {
+    return res.status(503).json({ error: "File storage is not ready. Please retry shortly." });
+  }
+  next();
 });
 
-const uploadsDir = path.join(__dirname, "uploads");
+// Multer uses an absolute temporary directory; files are removed after GridFS upload.
+const uploadsDir = path.join(require("os").tmpdir(), "virtual-locker-uploads");
+fs.mkdirSync(uploadsDir, { recursive: true });
+const storage = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => cb(null, `${crypto.randomUUID()}-${path.basename(file.originalname)}`)
+});
+const upload = multer({ storage, limits: { fileSize: Number(process.env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024 } });
 
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
+// Short-lived, process-local tokens for encrypted-folder access.
+const encryptedFolderTokens = new Map();
+const TOKEN_TTL_MS = 60 * 60 * 1000;
+const ENCRYPTED_FOLDER_NAME = "Encrypted Folder";
+
+// Resolve whether a folder is inside the encrypted folder, including nested folders.
+// Folder names are used as identifiers by the existing data model, so this follows
+// the project's current architecture rather than introducing a schema migration.
+async function isInsideEncryptedFolder(folderName) {
+  if (typeof folderName !== "string" || !folderName || folderName === "root") return false;
+  let current = folderName;
+  const visited = new Set();
+  while (current && current !== "root" && !visited.has(current)) {
+    if (current === ENCRYPTED_FOLDER_NAME) return true;
+    visited.add(current);
+    const folderDoc = await conn.db.collection("folders").findOne({ name: current });
+    if (!folderDoc) return false;
+    current = folderDoc.parent;
+  }
+  return false;
 }
 
-// Multer Configuration
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, file.originalname);
+async function encryptedFolderAccess(req, res, next) {
+  try {
+    const token = req.get("x-access-token");
+    const expiresAt = token && encryptedFolderTokens.get(token);
+    const validToken = Boolean(expiresAt && expiresAt > Date.now());
+    if (token && !validToken) encryptedFolderTokens.delete(token);
+
+    const folderTargets = [
+      req.body?.folder,
+      req.query?.folder,
+      req.body?.parentFolder,
+      req.body?.folderName,
+    ].filter(value => typeof value === "string" && value.length > 0);
+
+    let protectedTarget = false;
+    for (const folderName of folderTargets) {
+      if (await isInsideEncryptedFolder(folderName)) {
+        protectedTarget = true;
+        break;
+      }
     }
-});
 
-const upload = multer({ storage });
+    // File/folder operations can target an item by name rather than by folder path.
+    const targetName = req.params?.name || req.params?.filename || req.body?.oldName;
+    if (!protectedTarget && targetName) {
+      const files = await conn.db.collection("uploads.files")
+        .find({ filename: path.basename(targetName) }).toArray();
+      for (const file of files) {
+        if (await isInsideEncryptedFolder(file.metadata?.folder)) {
+          protectedTarget = true;
+          break;
+        }
+      }
+      if (!protectedTarget) {
+        const folderDocs = await conn.db.collection("folders").find({ name: targetName }).toArray();
+        for (const folderDoc of folderDocs) {
+          if (await isInsideEncryptedFolder(folderDoc.name) || await isInsideEncryptedFolder(folderDoc.parent)) {
+            protectedTarget = true;
+            break;
+          }
+        }
+      }
+    }
 
-const bcrypt = require('bcrypt');
+    if (protectedTarget && !validToken) {
+      return res.status(403).json({ error: "Encrypted Folder access expired. Unlock it again." });
+    }
+    next();
+  } catch (error) {
+    console.error("Encrypted-folder access check failed:", error);
+    res.status(500).json({ error: "Could not verify folder access." });
+  }
+}
+
+async function addFolderToArchive(archive, folderName, currentPath = '') {
+    // Add all files in current folder
+    const files = await conn.db.collection("uploads.files")
+        .find({ "metadata.folder": folderName })
+        .toArray();
+
+    for (const file of files) {
+        const downloadStream = gfs.openDownloadStream(file._id);
+        archive.append(downloadStream, { 
+            name: path.join(currentPath, file.filename) 
+        });
+    }
+
+    // Recursively add subfolders
+    const subfolders = await conn.db.collection("folders")
+        .find({ parent: folderName })
+        .toArray();
+
+    for (const subfolder of subfolders) {
+        const folderPath = path.join(currentPath, subfolder.name);
+        await addFolderToArchive(archive, subfolder.name, folderPath);
+    }
+}
+
+
+
 
 app.post('/verify-folder-password', async (req, res) => {
     const { folderName, password } = req.body;
-
+    
     if (folderName !== "Encrypted Folder") {
         return res.status(400).send("Not an encrypted folder");
     }
-
-    // This would normally come from your database
-    const correctPasswordHash = process.env.ENCRYPTED_FOLDER_PASSWORD_HASH ||
-        await bcrypt.hash("defaultpassword", 10);
-
-    // Compare password using bcrypt's constant-time comparison
-    const isValid = await bcrypt.compare(password, correctPasswordHash);
-
-    if (isValid) {
-        // Generate a temporary access token with timestamp (valid for 1 hour)
-        const timestamp = Date.now();
-        const token = crypto.randomBytes(32).toString('hex') + '.' + timestamp;
-        res.json({ success: true, token });
+    
+    // In a real app, you'd store hashed passwords in the database
+    // For demo purposes, we'll use a simple approach
+    if (typeof password !== "string" || !process.env.ENCRYPTED_FOLDER_PASSWORD_HASH) {
+        return res.status(503).json({ success: false, message: "Encrypted-folder password is not configured." });
+    }
+    const encryptedPassword = crypto.createHash("sha256").update(password).digest("hex");
+    const correctPasswordHash = process.env.ENCRYPTED_FOLDER_PASSWORD_HASH.trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(correctPasswordHash)) {
+        return res.status(503).json({ success: false, message: "Encrypted-folder password hash must be a 64-character SHA-256 hex digest." });
+    }
+    if (crypto.timingSafeEqual(Buffer.from(encryptedPassword), Buffer.from(correctPasswordHash))) {
+        const token = crypto.randomBytes(32).toString("hex");
+        encryptedFolderTokens.set(token, Date.now() + TOKEN_TTL_MS);
+        res.json({ success: true, token, expiresIn: TOKEN_TTL_MS / 1000 });
     } else {
         res.status(401).json({ success: false, message: "Incorrect password" });
     }
 });
 
 
-const checkEncryptedFolderAccess = (req, res, next) => {
-    const folder = req.body.folder || req.query.folder;
-
-    if (folder === "Encrypted Folder") {
-        // Verify access token
-        const token = req.headers['x-access-token'];
-        if (!token) {
-            return res.status(403).send("Access denied");
-        }
-
-        // Validate token format: hex.timestamp
-        const tokenParts = token.split('.');
-        if (tokenParts.length !== 2) {
-            return res.status(403).send("Invalid access token format");
-        }
-
-        const tokenHex = tokenParts[0];
-        const tokenTimestamp = parseInt(tokenParts[1], 10);
-
-        // Check if token is a valid hex string
-        const isValidHex = /^[0-9a-f]{64}$/.test(tokenHex);
-        if (!isValidHex) {
-            return res.status(403).send("Invalid access token");
-        }
-
-        // Check if timestamp is valid
-        if (isNaN(tokenTimestamp) || tokenTimestamp <= 0) {
-            return res.status(403).send("Invalid access token");
-        }
-
-        // Check if token has expired (valid for 1 hour)
-        const ONE_HOUR = 60 * 60 * 1000;
-        if (Date.now() - tokenTimestamp > ONE_HOUR) {
-            return res.status(403).send("Access token expired");
-        }
-    }
-
-    next();
-};
 // Upload Endpoint
-app.post(
-    "/upload",
-    checkEncryptedFolderAccess,
-    upload.single("file"),
-    async (req, res) => {
-        if (!req.file) {
-            return res.status(400).send("No file uploaded");
-        }
-
-        const tempPath = req.file.path;
-
-        try {
-            let folder = req.body.folder || "root";
-
-            if (typeof folder !== "string" || folder.length > 100) {
-                return res.status(400).send("Invalid folder name");
-            }
-
-            if (/[<>:"/\\|?*\x00-\x1f]/.test(folder)) {
-                return res.status(400).send(
-                    "Folder name contains invalid characters"
-                );
-            }
-
-            if (!gfs) {
-                return res.status(503).send(
-                    "File storage is not initialized"
-                );
-            }
-
-            const writeStream = gfs.openUploadStream(
-                req.file.originalname,
-                {
-                    metadata: {
-                        folder: folder.trim() || "root"
-                    }
-                }
-            );
-
-            await pipeline(
-                fs.createReadStream(tempPath),
-                writeStream
-            );
-
-            return res.status(200).json({
-                message: "File uploaded successfully",
-                file: {
-                    filename: req.file.originalname,
-                    size: req.file.size
-                }
-            });
-        } catch (error) {
-            console.error("Upload error:", error);
-
-            return res.status(500).json({
-                message: "Upload failed",
-                error: error.message
-            });
-        } finally {
-            try {
-                await fs.promises.unlink(tempPath);
-            } catch (error) {
-                if (error.code !== "ENOENT") {
-                    console.error(
-                        "Temporary file cleanup failed:",
-                        error
-                    );
-                }
-            }
-        }
+app.post("/upload", encryptedFolderAccess, upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  const tempPath = req.file.path;
+  try {
+    const folder = typeof req.body.folder === "string" ? req.body.folder.trim() || "root" : "root";
+    if (folder.length > 100 || /[<>:"/\\|?*\x00-\x1f]/.test(folder)) {
+      return res.status(400).json({ error: "Invalid folder name" });
     }
-);
+    const writeStream = gfs.openUploadStream(path.basename(req.file.originalname), {
+      metadata: { folder }
+    });
+    await require("stream/promises").pipeline(fs.createReadStream(tempPath), writeStream);
+    return res.status(201).json({ message: "File uploaded successfully", file: {
+      filename: path.basename(req.file.originalname), size: req.file.size, metadata: { folder }
+    }});
+  } catch (error) {
+    console.error("Upload error:", error);
+    return res.status(500).json({ error: "Upload failed" });
+  } finally {
+    try { await fs.promises.unlink(tempPath); } catch (error) {
+      if (error.code !== "ENOENT") console.error("Temporary upload cleanup failed:", error);
+    }
+  }
+});
 
 //  Add this endpoint
-app.post("/create-folder", checkEncryptedFolderAccess, async (req, res) => {
+app.post("/create-folder", encryptedFolderAccess, async (req, res) => {
     const { folderName, parentFolder } = req.body;
-
-    // Input validation
-    if (!folderName || typeof folderName !== 'string' || folderName.trim() === '') {
-        return res.status(400).send("Folder name is required");
-    }
-
-    // Limit folder name length
-    if (folderName.length > 100) {
-        return res.status(400).send("Folder name too long");
-    }
-
-    // Prevent problematic characters
-    if (/[<>:"/\\|?*\x00-\x1f]/.test(folderName)) {
-        return res.status(400).send("Folder name contains invalid characters");
-    }
-
+    
     try {
-        // Save folder metadata in a new collection (e.g., "folders")
+        if (typeof folderName !== "string" || !folderName.trim() || folderName.length > 100 || /[<>:"/\\|?*\x00-\x1f]/.test(folderName)) {
+            return res.status(400).json({ error: "Invalid folder name" });
+        }
         await conn.db.collection("folders").insertOne({
-            name: folderName.trim(),
+            name: folderName,
             parent: parentFolder || "root",
             type: "folder",
             created: new Date()
         });
-
+        
         res.status(201).send("Folder created");
     } catch (error) {
         res.status(500).send("Failed to create folder");
@@ -254,7 +233,7 @@ app.post("/create-folder", checkEncryptedFolderAccess, async (req, res) => {
 
 
 // ✅ ADD THIS (handles subfolders recursively + better error handling)
-app.post('/zip-folder', async (req, res) => {
+app.post('/zip-folder', encryptedFolderAccess, async (req, res) => {
     const { folderName } = req.body;
     const zipFileName = `${folderName}.zip`;
     const outputPath = path.join(__dirname, 'temp_zips', zipFileName); // Stores temp zip
@@ -329,87 +308,37 @@ app.post('/zip-folder', async (req, res) => {
 });
 
 // ✅ Helper function (must be included!)
-async function addFolderToArchive(archive, folderName, currentPath = '') {
-    // Add files in current folder
-    const files = await conn.db.collection("uploads.files")
-        .find({ "metadata.folder": folderName })
-        .toArray();
-
-    for (const file of files) {
-        const downloadStream = gfs.openDownloadStream(file._id);
-        archive.append(downloadStream, { 
-            name: path.join(currentPath, file.filename) 
-        });
-    }
-
-    // Recursively add subfolders
-    const subfolders = await conn.db.collection("folders")
-        .find({ parent: folderName })
-        .toArray();
-
-    for (const subfolder of subfolders) {
-        const folderPath = path.join(currentPath, subfolder.name);
-        await addFolderToArchive(archive, subfolder.name, folderPath);
-    }
-}
-
-
 // Add to server.js
-app.put('/rename', async (req, res) => {
+app.put('/rename', encryptedFolderAccess, async (req, res) => {
     const { oldName, newName, type } = req.body;
-
-    // Input validation
-    if (!oldName || typeof oldName !== 'string' || oldName.trim() === '') {
-        return res.status(400).send("Old name is required");
-    }
-
-    if (!newName || typeof newName !== 'string' || newName.trim() === '') {
-        return res.status(400).send("New name is required");
-    }
-
-    // Limit name length
-    if (oldName.length > 100 || newName.length > 100) {
-        return res.status(400).send("Name too long");
-    }
-
-    // Prevent problematic characters
-    const invalidCharPattern = /[<>:"/\\|?*\x00-\x1f]/;
-    if (invalidCharPattern.test(oldName) || invalidCharPattern.test(newName)) {
-        return res.status(400).send("Name contains invalid characters");
-    }
-
-    // Prevent same name
-    if (oldName.trim() === newName.trim()) {
-        return res.status(400).send("New name must be different from old name");
-    }
-
+    
     try {
         if (type === 'file') {
             // Rename file in GridFS
             await conn.db.collection("uploads.files").updateOne(
-                { filename: oldName.trim() },
-                { $set: { filename: newName.trim() } }
+                { filename: oldName },
+                { $set: { filename: newName } }
             );
         } else if (type === 'folder') {
             // Rename folder and update all references
             await conn.db.collection("folders").updateOne(
-                { name: oldName.trim() },
-                { $set: { name: newName.trim() } }
+                { name: oldName },
+                { $set: { name: newName } }
             );
-
+            
             // Update files in this folder
             await conn.db.collection("uploads.files").updateMany(
-                { "metadata.folder": oldName.trim() },
-                { $set: { "metadata.folder": newName.trim() } }
+                { "metadata.folder": oldName },
+                { $set: { "metadata.folder": newName } }
             );
-
+            
             // Update subfolders' parent references
             await conn.db.collection("folders").updateMany(
-                { parent: oldName.trim() },
-                { $set: { parent: newName.trim() } }
+                { parent: oldName },
+                { $set: { parent: newName } }
             );
         }
-
+        
         res.json({ success: true, message: "Renamed successfully" });
     } catch (error) {
         console.error("Rename error:", error);
@@ -422,7 +351,7 @@ app.put('/rename', async (req, res) => {
 
 
 // Get Files Endpoint (keep existing implementation)
-app.get("/files", async (req, res) => {
+app.get("/files", encryptedFolderAccess, async (req, res) => {
     const folder = req.query.folder || "root";
     try {
         const files = await conn.db.collection("uploads.files")
@@ -440,20 +369,33 @@ app.get("/files", async (req, res) => {
 });
 
 // Download Endpoint
-app.get('/download/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const downloadStream = gfs.openDownloadStreamByName(filename);
+app.get('/download/:filename', encryptedFolderAccess, async (req, res) => {
+    const filename = path.basename(req.params.filename);
+    try {
+      const file = await conn.db.collection("uploads.files").find({ filename }).sort({ uploadDate: -1 }).next();
+      if (!file) return res.status(404).send("File not found");
+      if (file.metadata?.folder === "Encrypted Folder") {
+        const token = req.get("x-access-token");
+        const expiresAt = token && encryptedFolderTokens.get(token);
+        if (!expiresAt || expiresAt <= Date.now()) return res.status(403).send("Encrypted Folder access expired");
+      }
+      const downloadStream = gfs.openDownloadStream(file._id);
     
-    // Set headers for download
-    res.set('Content-Type', 'application/octet-stream');
-    res.set('Content-Disposition', `attachment; filename="${filename}"`);
-
-    downloadStream.pipe(res)
-        .on('error', () => res.status(404).send("File not found"));
+      res.set("Content-Type", "application/octet-stream");
+      res.set("Content-Disposition", `attachment; filename="${filename.replace(/[\"\r\n]/g, "")}"`);
+      downloadStream.on("error", (error) => {
+        console.error("Download error:", error);
+        if (!res.headersSent) res.status(404).send("File not found"); else res.destroy(error);
+      });
+      downloadStream.pipe(res);
+    } catch (error) {
+      console.error("Download lookup error:", error);
+      if (!res.headersSent) res.status(500).send("Download failed");
+    }
 });
 
 // In server.js
-app.delete('/delete/:name', async (req, res) => {
+app.delete('/delete/:name', encryptedFolderAccess, async (req, res) => {
     const name = req.params.name;
     
     try {
@@ -511,10 +453,14 @@ app.delete('/delete/:name', async (req, res) => {
         });
     }
 });
-// Serve the Virtual Locker dashboard as the homepage
-app.get("/", (req, res) => {
-    res.sendFile(require("path").join(__dirname, "dashboard.html"));
-});
+
 // Start Server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running at http://localhost:${PORT}`));
+const PORT = Number(process.env.PORT) || 5000;
+const server = app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Virtual Locker listening on port ${PORT}`));
+function shutdown(signal) {
+  console.log(`${signal} received; shutting down...`);
+  server.close(() => mongoose.disconnect().finally(() => process.exit(0)));
+  setTimeout(() => process.exit(1), 10000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
